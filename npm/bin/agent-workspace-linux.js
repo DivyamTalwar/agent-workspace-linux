@@ -37,7 +37,8 @@ if (!fs.existsSync(binaryPath)) {
 // Ignore SIGINT in the launcher: let the child (MCP server) handle its own
 // shutdown. Without this both processes would receive the signal and the child
 // might not get a chance to flush stdio cleanly.
-process.on("SIGINT", () => {});
+const ignoreSigint = () => {};
+process.on("SIGINT", ignoreSigint);
 
 const child = spawn(binaryPath, process.argv.slice(2), {
   stdio: "inherit",
@@ -47,7 +48,10 @@ const child = spawn(binaryPath, process.argv.slice(2), {
 child.on("close", (code, signal) => {
   if (signal) {
     // Propagate signal so the parent's exit looks like a signalled death to
-    // any caller (e.g. npm run scripts that check $?).
+    // any caller (e.g. npm run scripts that check $?). Drop the SIGINT handler
+    // first: while it is installed it would swallow a re-raised SIGINT and the
+    // launcher would exit 0, reporting success for a Ctrl-C'd child.
+    process.removeListener("SIGINT", ignoreSigint);
     process.kill(process.pid, signal);
   } else {
     process.exit(code ?? 0);
