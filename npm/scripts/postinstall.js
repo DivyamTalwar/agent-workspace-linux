@@ -264,23 +264,31 @@ async function main() {
   }
   removeFileQuietly(tmpChecksumPath);
 
-  // Atomic rename: avoids leaving a half-written binary.
+  // Mark the verified staging file executable *before* publishing it. Doing
+  // this after the rename would expose a window where readers see a
+  // non-executable binary at destPath, and a chmod failure there would already
+  // have destroyed the previously installed, runnable binary.
   try {
-    fs.renameSync(tmpPath, destPath);
+    fs.chmodSync(tmpPath, 0o755);
   } catch (err) {
+    removeFileQuietly(tmpPath);
+    removeFileQuietly(tmpChecksumPath);
     console.error(
-      `agent-workspace-linux: could not move binary into place — ${err.message}`
+      `agent-workspace-linux: chmod failed — ${err.message}. ` +
+        "The previously installed binary (if any) was left untouched; " +
+        "re-run installation."
     );
     process.exit(1);
   }
 
-  // Mark executable.
+  // Atomic rename: avoids leaving a half-written binary, and publishes a file
+  // that is already executable.
   try {
-    fs.chmodSync(destPath, 0o755);
+    fs.renameSync(tmpPath, destPath);
   } catch (err) {
+    removeFileQuietly(tmpPath);
     console.error(
-      `agent-workspace-linux: chmod failed — ${err.message}. ` +
-        `Try: chmod 755 ${destPath}`
+      `agent-workspace-linux: could not move binary into place — ${err.message}`
     );
     process.exit(1);
   }
