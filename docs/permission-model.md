@@ -17,6 +17,13 @@ is the part still being built. Live viewer control (read_only/paused) is a
 runtime convenience, not an authoritative boundary; mutating daemon IPC fails
 closed if the shared control state cannot be read.
 
+Control-state writes use exclusively created staging files beside the shared
+record, then publish each complete state by atomic rename. Concurrent setters
+use last-successful-rename-wins ordering; this does not serialize authority
+decisions or change the permission ceiling. Ordinary failures clean up only
+the writer's own staging file. Forced termination may leave abandoned staging,
+and atomic publication does not promise durability across power loss.
+
 See [Status and remaining work](#status-and-remaining-work) for what is done and
 what is still planned.
 
