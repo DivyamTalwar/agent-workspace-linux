@@ -54,8 +54,66 @@ const checksumUrl = `${downloadUrl}.sha256`;
 
 const binDir = path.join(__dirname, "..", "bin");
 const destPath = path.join(binDir, "agent-workspace-linux");
-const tmpPath = destPath + ".tmp";
-const tmpChecksumPath = tmpPath + ".sha256";
+
+// Concurrent installs share bin/, so staging must not use fixed file names: one
+// install would delete or overwrite bytes another one is still verifying.
+// mkdtemp allocates a unique directory atomically, inside bin/ so publishing
+// stays a same-filesystem rename. Only the invocation that created a staging
+// directory ever removes it — never another invocation's files. Catchable
+// signals clean up before exit (below). A forced exit (SIGKILL/power loss)
+// can still leave an abandoned directory, so the next install sweeps staging
+// directories older than STALE_STAGING_MS; a live concurrent install is far
+// younger than that (its download is bounded), so it is never touched.
+let stagingDir = null;
+
+function createStagingDir() {
+  stagingDir = fs.mkdtempSync(path.join(binDir, ".staging-"));
+  return stagingDir;
+}
+
+function cleanupStagingDir() {
+  if (stagingDir === null) return;
+  try {
+    fs.rmSync(stagingDir, { recursive: true, force: true });
+  } catch (_) {}
+  stagingDir = null;
+}
+
+// Catchable termination (Ctrl-C, SIGTERM from a supervisor) must not leak the
+// staging directory. Clean up, then re-raise with default disposition so the
+// exit status still reflects the signal.
+if (require.main === module && typeof process.on === "function") {
+  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
+    process.on(signal, () => {
+      cleanupStagingDir();
+      process.removeAllListeners(signal);
+      process.kill(process.pid, signal);
+    });
+  }
+}
+
+// SIGKILL and power loss cannot be caught, so bound the leftovers: sweep
+// staging directories that are clearly abandoned (older than STALE_STAGING_MS).
+// Fresh ones may belong to a concurrent installer and are left alone.
+const STALE_STAGING_MS = 60 * 60 * 1000;
+function sweepStaleStagingDirs() {
+  let entries;
+  try {
+    entries = fs.readdirSync(binDir, { withFileTypes: true });
+  } catch (_) {
+    return;
+  }
+  const now = Date.now();
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !entry.name.startsWith(".staging-")) continue;
+    const full = path.join(binDir, entry.name);
+    try {
+      if (now - fs.statSync(full).mtimeMs > STALE_STAGING_MS) {
+        fs.rmSync(full, { recursive: true, force: true });
+      }
+    } catch (_) {}
+  }
+}
 
 // ── Download helper (follows redirects, max 5 hops) ─────────────────────────
 
@@ -137,12 +195,6 @@ function download(url, tmpFile, maxRedirects = 5) {
   });
 }
 
-function removeFileQuietly(file) {
-  try {
-    fs.unlinkSync(file);
-  } catch (_) {}
-}
-
 function parseSha256Sidecar(contents, expectedAssetName) {
   const lines = contents
     .split(/\r?\n/)
@@ -220,9 +272,11 @@ async function main() {
   // be defensive for edge-case installs).
   fs.mkdirSync(binDir, { recursive: true });
 
-  // Remove stale tmp file from a previous interrupted install.
-  removeFileQuietly(tmpPath);
-  removeFileQuietly(tmpChecksumPath);
+  // Staging owned by this invocation only.
+  sweepStaleStagingDirs();
+  const stagingRoot = createStagingDir();
+  const tmpPath = path.join(stagingRoot, assetName);
+  const tmpChecksumPath = `${tmpPath}.sha256`;
 
   console.log(
     `agent-workspace-linux: downloading ${assetName} v${version}…`
@@ -233,7 +287,7 @@ async function main() {
     await download(downloadUrl, tmpPath);
   } catch (err) {
     // Clean up in case the file was partially created.
-    removeFileQuietly(tmpPath);
+    cleanupStagingDir();
     // The download error text embeds the request URL (built from
     // package.json's version + the target triple). Log a fixed message rather
     // than interpolating that value, to avoid a log-injection sink; the URL
@@ -253,8 +307,7 @@ async function main() {
     await download(checksumUrl, tmpChecksumPath);
     await verifyChecksum(tmpPath, tmpChecksumPath, assetName);
   } catch (err) {
-    removeFileQuietly(tmpPath);
-    removeFileQuietly(tmpChecksumPath);
+    cleanupStagingDir();
     // Do not interpolate raw err.message (from untrusted sidecar/network) into logs.
     // This was flagged as log-injection (js/log-injection).
     console.error(
@@ -262,7 +315,6 @@ async function main() {
     );
     process.exit(1);
   }
-  removeFileQuietly(tmpChecksumPath);
 
   // Mark the verified staging file executable *before* publishing it. Doing
   // this after the rename would expose a window where readers see a
@@ -271,8 +323,7 @@ async function main() {
   try {
     fs.chmodSync(tmpPath, 0o755);
   } catch (err) {
-    removeFileQuietly(tmpPath);
-    removeFileQuietly(tmpChecksumPath);
+    cleanupStagingDir();
     console.error(
       `agent-workspace-linux: chmod failed — ${err.message}. ` +
         "The previously installed binary (if any) was left untouched; " +
@@ -286,24 +337,32 @@ async function main() {
   try {
     fs.renameSync(tmpPath, destPath);
   } catch (err) {
-    removeFileQuietly(tmpPath);
+    cleanupStagingDir();
     console.error(
       `agent-workspace-linux: could not move binary into place — ${err.message}`
     );
     process.exit(1);
   }
 
+  cleanupStagingDir();
+
   console.log(`agent-workspace-linux: binary installed at ${destPath}`);
 }
 
 if (require.main === module) {
   main().catch((err) => {
+    // process.exit() is immediate, so staging must be removed before it: every
+    // error path above cleans up synchronously, and this handles unexpected
+    // throws in between.
+    cleanupStagingDir();
     console.error(`agent-workspace-linux: postinstall failed — ${err.message}`);
     process.exit(1);
   });
 }
 
 module.exports = {
+  sweepStaleStagingDirs,
+  STALE_STAGING_MS,
   parseSha256Sidecar,
   fileSha256,
   verifyChecksum,
