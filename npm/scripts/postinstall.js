@@ -161,18 +161,18 @@ function parseSha256Sidecar(contents, expectedAssetName) {
     if (!/^[a-fA-F0-9]{64}(\s+\*?(\S.*)?)?$/.test(trimmed)) {
       throw new Error(`invalid checksum sidecar line: ${line}`);
     }
-    const spaceIdx = trimmed.indexOf(' ');
-    let checksum, fileNamePart;
-    if (spaceIdx === -1) {
-      checksum = trimmed;
-      fileNamePart = null;
-    } else {
-      checksum = trimmed.slice(0, spaceIdx);
-      fileNamePart = trimmed.slice(spaceIdx + 1).replace(/^\*?\s*/, '');
-    }
+    // The line matched above, so the first 64 chars are the checksum; the rest
+    // is "<whitespace>[*]<filename>". Scan forward (no regex backtracking) so
+    // any whitespace delimiter works, not just a single space.
+    const checksum = trimmed.slice(0, 64);
+    let i = 64;
+    while (i < trimmed.length && /\s/.test(trimmed[i])) i++;
+    if (trimmed[i] === '*') i++; // sha256sum binary-mode marker
+    while (i < trimmed.length && /\s/.test(trimmed[i])) i++;
+    const fileNamePart = trimmed.slice(i);
     candidates.push({
       checksum: checksum.toLowerCase(),
-      fileName: fileNamePart && fileNamePart.length ? fileNamePart.trim() : null,
+      fileName: fileNamePart.length ? fileNamePart : null,
     });
   }
 

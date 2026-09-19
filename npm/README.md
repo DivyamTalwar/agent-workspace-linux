@@ -23,6 +23,10 @@ Release downloads accept absolute or relative HTTPS redirect locations, with
 a maximum of five redirect hops. Malformed URLs and non-HTTPS redirect targets
 fail the download; redirects do not bypass the required checksum verification.
 
+Checksum sidecars must contain a valid 64-hex-digit SHA-256 digest and name the
+expected release asset. Space and tab separators are accepted. A bare digest or
+an entry naming a different asset is rejected.
+
 ## Usage
 
 Once installed, the server is on your PATH (the command stays unscoped):
