@@ -184,7 +184,7 @@ test(
     clock.advance(1);
     await completion(state);
     assert.equal(state.settled, true, "must settle once the idle timeout elapses");
-    assert.match(timedOut(state), /timed out/i);
+    assert.match(timedOut(state), /no download progress/i);
     assert.equal(httpsMock.requests[0].destroyed, true, "request must be destroyed");
     assert.equal(fs.existsSync(tmpFile), false);
     assert.equal(clock.pending(), 0);
@@ -213,7 +213,7 @@ test(
     clock.advance(IDLE_TIMEOUT);
     await completion(state);
     assert.equal(state.settled, true);
-    assert.match(timedOut(state), /timed out/i);
+    assert.match(timedOut(state), /no download progress/i);
     assert.equal(response.destroyed, true, "response must be destroyed");
     assert.equal(fs.existsSync(tmpFile), false, "partial file must be cleaned up");
     assert.equal(clock.pending(), 0);
@@ -354,7 +354,7 @@ test("timeout remains the reason when destroying a request emits an immediate er
     req.destroy = () => { req.destroyed = true; req.emit("error", new Error("aborted transport")); };
   }]);
   const pending = loadDownload(httpsMock, clock)("https://example.invalid/asset", tmpFile);
-  const assertion = assert.rejects(pending, /timed out/i);
+  const assertion = assert.rejects(pending, /no download progress/i);
   await tick();
   clock.advance(IDLE_TIMEOUT);
   await assertion;
@@ -391,7 +391,7 @@ test("expiry during a pending file open closes and removes it before retry", wit
     (req, cb) => { const res = makeResponse(200); cb(res); res.push("retry survives"); res.push(null); },
   ]);
   const download = loadDownload(httpsMock, clock);
-  await assert.rejects(download("https://example.invalid/asset", tmpFile), /timed out/i);
+  await assert.rejects(download("https://example.invalid/asset", tmpFile), /no download progress/i);
   assert.equal(fs.existsSync(tmpFile), false);
   await download("https://example.invalid/asset", tmpFile);
   await tick();
@@ -416,7 +416,7 @@ test("a late header callback after expiry cannot create a download", withTmp(asy
   let headers;
   const httpsMock = makeHttps([(req, cb) => { headers = cb; }]);
   const pending = loadDownload(httpsMock, clock)("https://example.invalid/asset", tmpFile);
-  const assertion = assert.rejects(pending, /timed out/i);
+  const assertion = assert.rejects(pending, /no download progress/i);
   await tick(); clock.advance(IDLE_TIMEOUT); await assertion;
   const res = makeResponse(200); headers(res); await tick();
   assert.equal(res.destroyed, true);
