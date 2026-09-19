@@ -66,47 +66,71 @@ const tmpChecksumPath = tmpPath + ".sha256";
 function download(url, tmpFile, maxRedirects = 5) {
   return new Promise((resolve, reject) => {
     function get(currentUrl, hopsLeft) {
-      https
-        .get(currentUrl, { headers: { "User-Agent": "node-fetch/postinstall" } }, (res) => {
-          const { statusCode, headers } = res;
+      try {
+        https
+          .get(currentUrl, { headers: { "User-Agent": "node-fetch/postinstall" } }, (res) => {
+            const { statusCode, headers } = res;
 
-          // Follow redirects (GitHub releases always redirect to S3).
-          if (statusCode >= 300 && statusCode < 400 && headers.location) {
-            if (hopsLeft === 0) {
-              res.resume();
-              return reject(new Error(`Too many redirects downloading ${url}`));
+            // Follow redirects (GitHub releases always redirect to S3).
+            if (statusCode >= 300 && statusCode < 400 && headers.location) {
+              if (hopsLeft === 0) {
+                res.resume();
+                return reject(new Error(`Too many redirects downloading ${url}`));
+              }
+              res.resume(); // drain and ignore body
+
+              // Location may be relative, query-only or protocol-relative
+              // (RFC 7231 allows all three), so resolve it against the URL we
+              // just requested instead of handing it to https.get verbatim.
+              let nextUrl;
+              try {
+                nextUrl = new URL(headers.location, currentUrl);
+              } catch (_) {
+                return reject(
+                  new Error(`Invalid redirect location downloading ${url}`)
+                );
+              }
+              if (nextUrl.protocol !== "https:") {
+                return reject(
+                  new Error(`Refusing non-HTTPS redirect downloading ${url}`)
+                );
+              }
+              return get(nextUrl.href, hopsLeft - 1);
             }
-            res.resume(); // drain and ignore body
-            return get(headers.location, hopsLeft - 1);
-          }
 
-          if (statusCode !== 200) {
-            res.resume();
-            return reject(
-              new Error(
-                `Failed to download ${url}: HTTP ${statusCode}. ` +
-                  "Check that the release exists, includes the binary and .sha256 sidecar, " +
-                  "and the version in package.json matches."
-              )
-            );
-          }
+            if (statusCode !== 200) {
+              res.resume();
+              return reject(
+                new Error(
+                  `Failed to download ${url}: HTTP ${statusCode}. ` +
+                    "Check that the release exists, includes the binary and .sha256 sidecar, " +
+                    "and the version in package.json matches."
+                )
+              );
+            }
 
-          const out = fs.createWriteStream(tmpFile);
-          res.pipe(out);
-          out.on("finish", () => out.close(resolve));
-          out.on("error", (err) => {
-            fs.unlink(tmpFile, () => {}); // best-effort cleanup
-            reject(err);
-          });
-          res.on("error", (err) => {
+            const out = fs.createWriteStream(tmpFile);
+            res.pipe(out);
+            out.on("finish", () => out.close(resolve));
+            out.on("error", (err) => {
+              fs.unlink(tmpFile, () => {}); // best-effort cleanup
+              reject(err);
+            });
+            res.on("error", (err) => {
+              fs.unlink(tmpFile, () => {});
+              reject(err);
+            });
+          })
+          .on("error", (err) => {
             fs.unlink(tmpFile, () => {});
             reject(err);
           });
-        })
-        .on("error", (err) => {
-          fs.unlink(tmpFile, () => {});
-          reject(err);
-        });
+      } catch (err) {
+        // https.get throws synchronously on an unusable target; from inside a
+        // response callback that would be an uncaught exception, so reject.
+        fs.unlink(tmpFile, () => {});
+        reject(err);
+      }
     }
 
     get(url, maxRedirects);

@@ -19,6 +19,10 @@ then verifies the required `<asset>.sha256` sidecar before installing it.
 > node $(npm root -g)/@agent-sh/agent-workspace-linux/scripts/postinstall.js
 > ```
 
+Release downloads accept absolute or relative HTTPS redirect locations, with
+a maximum of five redirect hops. Malformed URLs and non-HTTPS redirect targets
+fail the download; redirects do not bypass the required checksum verification.
+
 ## Usage
 
 Once installed, the server is on your PATH (the command stays unscoped):

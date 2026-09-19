@@ -165,7 +165,7 @@ jobs:
         run: node --check npm/scripts/postinstall.js
 
       - name: Test postinstall checksum verification
-        run: node --test npm/scripts/postinstall.test.js
+        run: node --test npm/scripts/postinstall.test.js npm/tests/*.test.cjs
 
       - name: Syntax check agent-workspace-linux.js
         run: node --check npm/bin/agent-workspace-linux.js
