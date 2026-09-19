@@ -30,6 +30,7 @@ an entry naming a different asset is rejected.
 The postinstall script applies executable permissions to the verified staging
 file before replacing an installed binary. If permission preparation fails, it
 reports failure and leaves the previously installed binary untouched.
+
 ## Usage
 
 Once installed, the server is on your PATH (the command stays unscoped):
@@ -50,6 +51,10 @@ It is an [MCP](https://modelcontextprotocol.io/) server that speaks JSON-RPC ove
   }
 }
 ```
+
+The command-line wrapper preserves the native program's exit code and terminating
+signal. In particular, a child terminated by SIGINT causes the wrapper to
+terminate by SIGINT too, rather than report exit code zero.
 
 ## Source and full documentation
 
