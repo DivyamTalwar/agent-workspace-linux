@@ -31,6 +31,12 @@ The postinstall script applies executable permissions to the verified staging
 file before replacing an installed binary. If permission preparation fails, it
 reports failure and leaves the previously installed binary untouched.
 
+Each install uses its own uniquely created staging directory beside the binary.
+Concurrent installs do not remove or overwrite one another's downloads. Normal
+completion and errors clean up the attempt's own staging directory; forced
+termination can leave an abandoned `.staging-*` directory. A later install does
+not delete it automatically, because another installer may still be using it.
+
 ## Usage
 
 Once installed, the server is on your PATH (the command stays unscoped):
